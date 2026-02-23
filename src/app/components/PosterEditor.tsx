@@ -127,6 +127,7 @@ export function PosterEditor() {
   const [initialPinchDistance, setInitialPinchDistance] = useState<number | null>(null);
   const [initialScale, setInitialScale] = useState(1);
   const [showMobileZoom, setShowMobileZoom] = useState(false);
+  const hasInitialScaleRef = useRef(false);
 
   // Initialize with canvas panel open on desktop
   useEffect(() => {
@@ -151,7 +152,10 @@ export function PosterEditor() {
           const scaleY = containerHeight / selectedRatio.height;
           const baseScale = Math.min(scaleX, scaleY);
           
-          setCanvasScale(Math.max(0.01, Math.min(baseScale, 0.9))); // Max 0.9 to leave some space
+          if (!hasInitialScaleRef.current) {
+            setCanvasScale(Math.max(0.01, Math.min(baseScale, 0.9))); // Set only once
+            hasInitialScaleRef.current = true;
+          }
         }
       }
     };
@@ -159,7 +163,7 @@ export function PosterEditor() {
     updateScale();
     window.addEventListener('resize', updateScale);
     return () => window.removeEventListener('resize', updateScale);
-  }, [selectedRatio, activePanel]); // Re-scale when panel opens/closes
+  }, [selectedRatio.width, selectedRatio.height]); // Recompute baseScale only for first ratio & on resize
 
   useEffect(() => {
     if (isEditingText && textInputRef.current) {
@@ -273,123 +277,160 @@ export function PosterEditor() {
     }
   };
 
+  const handleElementTouchStart = (e: React.TouchEvent, elementId: string) => {
+    if (e.touches.length !== 1) return;
+    e.stopPropagation();
+    setSelectedElementId(elementId);
+    setIsDragging(true);
+    setIsEditingText(false);
+    const touch = e.touches[0];
+    const element = elements.find((el) => el.id === elementId);
+    if (element && canvasRef.current && touch) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const touchX = (touch.clientX - rect.left) / canvasScale;
+      const touchY = (touch.clientY - rect.top) / canvasScale;
+      setDragStart({
+        x: touchX - element.x,
+        y: touchY - element.y,
+      });
+    }
+  };
+
+  // Shared helpers for drag/resize/rotate (mouse & touch)
+  const applyDragAtPoint = (clientX: number, clientY: number) => {
+    if (!selectedElementId) return;
+    const element = elements.find((el) => el.id === selectedElementId);
+    if (!element || !canvasRef.current) return;
+
+    const rect = canvasRef.current.getBoundingClientRect();
+    const pointerX = (clientX - rect.left) / canvasScale;
+    const pointerY = (clientY - rect.top) / canvasScale;
+    let newX = pointerX - dragStart.x;
+    let newY = pointerY - dragStart.y;
+
+    // Smart Guides Logic
+    const SNAP_THRESHOLD = 5;
+    const newGuides: Array<{ type: 'horizontal' | 'vertical', position: number }> = [];
+    const centerX = newX + element.width / 2;
+    const centerY = newY + element.height / 2;
+    const canvasCenterX = selectedRatio.width / 2;
+    const canvasCenterY = selectedRatio.height / 2;
+
+    // Snap to Canvas Center
+    if (Math.abs(centerX - canvasCenterX) < SNAP_THRESHOLD) {
+      newX = canvasCenterX - element.width / 2;
+      newGuides.push({ type: 'vertical', position: canvasCenterX });
+    }
+    if (Math.abs(centerY - canvasCenterY) < SNAP_THRESHOLD) {
+      newY = canvasCenterY - element.height / 2;
+      newGuides.push({ type: 'horizontal', position: canvasCenterY });
+    }
+
+    // Snap to other elements
+    elements.forEach(other => {
+      if (other.id === selectedElementId) return;
+      const otherCenterX = other.x + other.width / 2;
+      const otherCenterY = other.y + other.height / 2;
+
+      if (Math.abs(centerX - otherCenterX) < SNAP_THRESHOLD) {
+        newX = otherCenterX - element.width / 2;
+        newGuides.push({ type: 'vertical', position: otherCenterX });
+      }
+      if (Math.abs(centerY - otherCenterY) < SNAP_THRESHOLD) {
+        newY = otherCenterY - element.height / 2;
+        newGuides.push({ type: 'horizontal', position: otherCenterY });
+      }
+    });
+
+    setGuides(newGuides);
+
+    updateElement(selectedElementId, {
+      x: newX,
+      y: newY,
+    });
+  };
+
+  const applyResizeAtPoint = (clientX: number, clientY: number) => {
+    if (!selectedElementId || !resizeDirection) return;
+    const element = elements.find((el) => el.id === selectedElementId);
+    if (!element || !canvasRef.current) return;
+
+    const rect = canvasRef.current.getBoundingClientRect();
+    const pointerX = (clientX - rect.left) / canvasScale;
+    const pointerY = (clientY - rect.top) / canvasScale;
+
+    let newX = element.x;
+    let newY = element.y;
+    let newWidth = element.width;
+    let newHeight = element.height;
+
+    // Simple resizing logic
+    if (resizeDirection.includes('e')) newWidth = Math.max(20, pointerX - element.x);
+    if (resizeDirection.includes('w')) {
+      const diff = element.x - pointerX;
+      newWidth = Math.max(20, element.width + diff);
+      newX = element.x - (newWidth - element.width);
+    }
+    if (resizeDirection.includes('s')) newHeight = Math.max(20, pointerY - element.y);
+    if (resizeDirection.includes('n')) {
+      const diff = element.y - pointerY;
+      newHeight = Math.max(20, element.height + diff);
+      newY = element.y - (newHeight - element.height);
+    }
+
+    const updates: Partial<CanvasElement> = {
+      x: newX,
+      y: newY,
+      width: newWidth,
+      height: newHeight,
+    };
+
+    if (element.type === 'text' && ['nw', 'ne', 'sw', 'se'].includes(resizeDirection)) {
+      const newSize = Math.max(newWidth, newHeight);
+      const originalSize = (element as any).originalSize || Math.max(element.width, element.height);
+      const originalFontSize = (element as any).originalFontSize || element.fontSize || 32;
+      const scaleFactor = newSize / originalSize;
+      updates.fontSize = Math.max(12, Math.round(originalFontSize * scaleFactor));
+    }
+
+    updateElement(selectedElementId, updates);
+  };
+
+  const applyRotateAtPoint = (clientX: number, clientY: number) => {
+    if (!selectedElementId) return;
+    const element = elements.find((el) => el.id === selectedElementId);
+    if (!element || !canvasRef.current) return;
+
+    const rect = canvasRef.current.getBoundingClientRect();
+    const pointerX = (clientX - rect.left) / canvasScale;
+    const pointerY = (clientY - rect.top) / canvasScale;
+    const centerX = element.x + element.width / 2;
+    const centerY = element.y + element.height / 2;
+
+    const currentAngle = Math.atan2(pointerY - centerY, pointerX - centerX) * (180 / Math.PI);
+    const angleDiff = currentAngle - rotationStart.mouseAngle;
+    let newRotation = rotationStart.angle + angleDiff;
+
+    // Snap rotation every 45 degrees with a small threshold
+    const SNAP_ANGLE = 45;
+    const SNAP_THRESHOLD_DEG = 4;
+    const snapped = Math.round(newRotation / SNAP_ANGLE) * SNAP_ANGLE;
+    if (Math.abs(snapped - newRotation) < SNAP_THRESHOLD_DEG) {
+      newRotation = snapped;
+    }
+
+    updateElement(selectedElementId, {
+      rotation: newRotation,
+    });
+  };
+
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isDragging && selectedElementId) {
-      const element = elements.find((el) => el.id === selectedElementId);
-      if (element) {
-        const rect = canvasRef.current?.getBoundingClientRect();
-        if (rect) {
-          const mouseX = (e.clientX - rect.left) / canvasScale;
-          const mouseY = (e.clientY - rect.top) / canvasScale;
-          let newX = mouseX - dragStart.x;
-          let newY = mouseY - dragStart.y;
-          
-          // Smart Guides Logic
-          const SNAP_THRESHOLD = 5;
-          const newGuides: Array<{ type: 'horizontal' | 'vertical', position: number }> = [];
-          const centerX = newX + element.width / 2;
-          const centerY = newY + element.height / 2;
-          const canvasCenterX = selectedRatio.width / 2;
-          const canvasCenterY = selectedRatio.height / 2;
-          
-          // Snap to Canvas Center
-          if (Math.abs(centerX - canvasCenterX) < SNAP_THRESHOLD) {
-            newX = canvasCenterX - element.width / 2;
-            newGuides.push({ type: 'vertical', position: canvasCenterX });
-          }
-          if (Math.abs(centerY - canvasCenterY) < SNAP_THRESHOLD) {
-            newY = canvasCenterY - element.height / 2;
-            newGuides.push({ type: 'horizontal', position: canvasCenterY });
-          }
-          
-          // Snap to other elements
-          elements.forEach(other => {
-             if (other.id === selectedElementId) return;
-             const otherCenterX = other.x + other.width / 2;
-             const otherCenterY = other.y + other.height / 2;
-             
-             if (Math.abs(centerX - otherCenterX) < SNAP_THRESHOLD) {
-                 newX = otherCenterX - element.width / 2;
-                 newGuides.push({ type: 'vertical', position: otherCenterX });
-             }
-             if (Math.abs(centerY - otherCenterY) < SNAP_THRESHOLD) {
-                 newY = otherCenterY - element.height / 2;
-                 newGuides.push({ type: 'horizontal', position: otherCenterY });
-             }
-          });
-          
-          setGuides(newGuides);
-
-          updateElement(selectedElementId, {
-            x: newX,
-            y: newY,
-          });
-        }
-      }
+      applyDragAtPoint(e.clientX, e.clientY);
     } else if (isResizing && selectedElementId) {
-      const element = elements.find((el) => el.id === selectedElementId);
-      if (element && resizeDirection) {
-        const rect = canvasRef.current?.getBoundingClientRect();
-        if (rect) {
-          const mouseX = (e.clientX - rect.left) / canvasScale;
-          const mouseY = (e.clientY - rect.top) / canvasScale;
-          
-          let newX = element.x;
-          let newY = element.y;
-          let newWidth = element.width;
-          let newHeight = element.height;
-
-          // Simple resizing logic
-          if (resizeDirection.includes('e')) newWidth = Math.max(20, mouseX - element.x);
-          if (resizeDirection.includes('w')) {
-            const diff = element.x - mouseX;
-            newWidth = Math.max(20, element.width + diff);
-            newX = element.x - (newWidth - element.width);
-          }
-          if (resizeDirection.includes('s')) newHeight = Math.max(20, mouseY - element.y);
-          if (resizeDirection.includes('n')) {
-            const diff = element.y - mouseY;
-            newHeight = Math.max(20, element.height + diff);
-            newY = element.y - (newHeight - element.height);
-          }
-
-          const updates: Partial<CanvasElement> = {
-            x: newX,
-            y: newY,
-            width: newWidth,
-            height: newHeight,
-          };
-
-          if (element.type === 'text' && ['nw', 'ne', 'sw', 'se'].includes(resizeDirection)) {
-            const newSize = Math.max(newWidth, newHeight);
-            const originalSize = (element as any).originalSize || Math.max(element.width, element.height);
-            const originalFontSize = (element as any).originalFontSize || element.fontSize || 32;
-            const scaleFactor = newSize / originalSize;
-            updates.fontSize = Math.max(12, Math.round(originalFontSize * scaleFactor));
-          }
-
-          updateElement(selectedElementId, updates);
-        }
-      }
+      applyResizeAtPoint(e.clientX, e.clientY);
     } else if (isRotating && selectedElementId) {
-      const element = elements.find((el) => el.id === selectedElementId);
-      if (element) {
-        const rect = canvasRef.current?.getBoundingClientRect();
-        if (rect) {
-          const mouseX = (e.clientX - rect.left) / canvasScale;
-          const mouseY = (e.clientY - rect.top) / canvasScale;
-          const centerX = element.x + element.width / 2;
-          const centerY = element.y + element.height / 2;
-          
-          const currentAngle = Math.atan2(mouseY - centerY, mouseX - centerX) * (180 / Math.PI);
-          const angleDiff = currentAngle - rotationStart.mouseAngle;
-          const newRotation = rotationStart.angle + angleDiff;
-          
-          updateElement(selectedElementId, {
-            rotation: newRotation,
-          });
-        }
-      }
+      applyRotateAtPoint(e.clientX, e.clientY);
     }
   };
 
@@ -437,6 +478,43 @@ export function PosterEditor() {
     }
   };
 
+  const handleResizeTouchStart = (e: React.TouchEvent, elementId: string, direction: string) => {
+    if (e.touches.length !== 1) return;
+    e.stopPropagation();
+    const element = elements.find((el) => el.id === elementId);
+    if (element) {
+      setSelectedElementId(elementId);
+      setIsResizing(true);
+      setResizeDirection(direction);
+      if (element.type === 'text') {
+        const originalSize = Math.max(element.width, element.height);
+        (element as any).originalSize = originalSize;
+        (element as any).originalFontSize = element.fontSize || 32;
+      }
+    }
+  };
+
+  const handleRotateTouchStart = (e: React.TouchEvent, elementId: string) => {
+    if (e.touches.length !== 1) return;
+    e.stopPropagation();
+    setSelectedElementId(elementId);
+    setIsRotating(true);
+    const element = elements.find((el) => el.id === elementId);
+    const touch = e.touches[0];
+    if (element && canvasRef.current && touch) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const touchX = (touch.clientX - rect.left) / canvasScale;
+      const touchY = (touch.clientY - rect.top) / canvasScale;
+      const centerX = element.x + element.width / 2;
+      const centerY = element.y + element.height / 2;
+      const currentAngle = Math.atan2(touchY - centerY, touchX - centerX) * (180 / Math.PI);
+      setRotationStart({
+        angle: element.rotation,
+        mouseAngle: currentAngle,
+      });
+    }
+  };
+
   // Touch handlers for pinch zoom
   type SimpleTouchList = {
     length: number;
@@ -463,15 +541,38 @@ export function PosterEditor() {
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
+    // Pinch zoom with two fingers
     if (e.touches.length === 2 && initialPinchDistance !== null) {
       e.preventDefault();
       const currentDistance = getTouchDistance(e.touches);
       const scale = (currentDistance / initialPinchDistance) * initialScale;
       setCanvasScale(Math.max(0.1, Math.min(3, scale)));
+      return;
+    }
+
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+
+    // Single-finger interactions
+    if (isDragging && selectedElementId) {
+      e.preventDefault();
+      applyDragAtPoint(touch.clientX, touch.clientY);
+    } else if (isResizing && selectedElementId) {
+      e.preventDefault();
+      applyResizeAtPoint(touch.clientX, touch.clientY);
+    } else if (isRotating && selectedElementId) {
+      e.preventDefault();
+      applyRotateAtPoint(touch.clientX, touch.clientY);
     }
   };
 
-  const handleTouchEnd = () => {
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (e.touches.length === 0) {
+      setIsDragging(false);
+      setIsResizing(false);
+      setIsRotating(false);
+      setResizeDirection('');
+    }
     setInitialPinchDistance(null);
     setGuides([]);
   };
@@ -889,7 +990,7 @@ export function PosterEditor() {
         </div>
 
         {/* Canvas Background & Container */}
-        <div className="flex-1 relative bg-[#f0f2f5] overflow-hidden flex items-center justify-center p-8">
+        <div className="flex-1 relative bg-[#f0f2f5] overflow-hidden flex items-center justify-center md:items-center md:justify-center p-6 md:p-8">
            {/* Background Pattern */}
            <div className="absolute inset-0 opacity-[0.03]" 
                 style={{ 
@@ -938,6 +1039,7 @@ export function PosterEditor() {
                       transform: `rotate(${element.rotation}deg)`,
                     }}
                     onMouseDown={(e) => handleMouseDown(e, element.id)}
+                    onTouchStart={(e) => handleElementTouchStart(e, element.id)}
                     onClick={(e) => { 
                       e.stopPropagation();
                       if (selectedElementId !== element.id) {
@@ -1020,12 +1122,14 @@ export function PosterEditor() {
                               ${dir === 'e' ? '-right-1.5 cursor-ew-resize' : ''}
                             `}
                             onMouseDown={(e) => handleResizeMouseDown(e, element.id, dir)}
+                            onTouchStart={(e) => handleResizeTouchStart(e, element.id, dir)}
                           />
                         ))}
                         {/* Rotation Handle */}
                         <div
                           className="absolute -top-8 left-1/2 -translate-x-1/2 w-6 h-6 flex items-center justify-center bg-white rounded-full shadow-md cursor-grab active:cursor-grabbing hover:bg-orange-50"
                           onMouseDown={(e) => handleRotateMouseDown(e, element.id)}
+                          onTouchStart={(e) => handleRotateTouchStart(e, element.id)}
                         >
                           <RotateCw size={14} className="text-[#ff6000]" />
                         </div>
