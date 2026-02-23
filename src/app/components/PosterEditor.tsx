@@ -128,6 +128,7 @@ export function PosterEditor() {
   const [initialScale, setInitialScale] = useState(1);
   const [showMobileZoom, setShowMobileZoom] = useState(false);
   const hasInitialScaleRef = useRef(false);
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
 
   // Initialize with canvas panel open on desktop
   useEffect(() => {
@@ -137,6 +138,20 @@ export function PosterEditor() {
   }, []);
 
   const selectedElement = elements.find((el) => el.id === selectedElementId);
+
+  // Reliable viewport height for mobile (avoid 100vh issues)
+  useEffect(() => {
+    const updateViewportHeight = () => {
+      setViewportHeight(window.innerHeight);
+    };
+    updateViewportHeight();
+    window.addEventListener('resize', updateViewportHeight);
+    window.addEventListener('orientationchange', updateViewportHeight);
+    return () => {
+      window.removeEventListener('resize', updateViewportHeight);
+      window.removeEventListener('orientationchange', updateViewportHeight);
+    };
+  }, []);
 
   useEffect(() => {
     const updateScale = () => {
@@ -531,22 +546,71 @@ export function PosterEditor() {
     return Math.hypot(dx, dy);
   };
 
+  // Element pinch-zoom state
+  const pinchElementRef = useRef<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    fontSize?: number;
+  } | null>(null);
+
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
-      e.preventDefault();
-      const distance = getTouchDistance(e.touches);
-      setInitialPinchDistance(distance);
-      setInitialScale(canvasScale);
+      // Pinch zoom only when an element is selected
+      if (selectedElementId) {
+        e.preventDefault();
+        const distance = getTouchDistance(e.touches);
+        setInitialPinchDistance(distance);
+        setInitialScale(1);
+
+        const element = elements.find(el => el.id === selectedElementId);
+        if (element) {
+          pinchElementRef.current = {
+            x: element.x,
+            y: element.y,
+            width: element.width,
+            height: element.height,
+            fontSize: element.fontSize,
+          };
+        } else {
+          pinchElementRef.current = null;
+        }
+      }
+      return;
     }
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    // Pinch zoom with two fingers
-    if (e.touches.length === 2 && initialPinchDistance !== null) {
+    // Pinch zoom with two fingers: scale selected element only
+    if (e.touches.length === 2 && initialPinchDistance !== null && selectedElementId && pinchElementRef.current) {
       e.preventDefault();
       const currentDistance = getTouchDistance(e.touches);
       const scale = (currentDistance / initialPinchDistance) * initialScale;
-      setCanvasScale(Math.max(0.1, Math.min(3, scale)));
+
+      const base = pinchElementRef.current;
+      const MIN_SIZE = 40;
+      const newWidth = Math.max(MIN_SIZE, base.width * scale);
+      const newHeight = Math.max(MIN_SIZE, base.height * scale);
+
+      const centerX = base.x + base.width / 2;
+      const centerY = base.y + base.height / 2;
+      const newX = centerX - newWidth / 2;
+      const newY = centerY - newHeight / 2;
+
+      const updates: Partial<CanvasElement> = {
+        x: newX,
+        y: newY,
+        width: newWidth,
+        height: newHeight,
+      };
+
+      if (base.fontSize) {
+        const scaleFactor = newWidth / base.width;
+        updates.fontSize = Math.max(12, Math.round(base.fontSize * scaleFactor));
+      }
+
+      updateElement(selectedElementId, updates);
       return;
     }
 
@@ -572,6 +636,7 @@ export function PosterEditor() {
       setIsResizing(false);
       setIsRotating(false);
       setResizeDirection('');
+      pinchElementRef.current = null;
     }
     setInitialPinchDistance(null);
     setGuides([]);
@@ -698,7 +763,10 @@ export function PosterEditor() {
   );
 
   return (
-    <div className="flex h-screen w-full bg-[#f8f9fa] overflow-hidden text-slate-900">
+    <div
+      className="flex w-full bg-[#f8f9fa] overflow-hidden text-slate-900"
+      style={{ height: viewportHeight ?? '100vh' }}
+    >
       {/* Desktop Sidebar */}
       <div className="hidden md:flex flex-col w-[80px] bg-white border-r border-gray-200 items-center py-6 gap-2 z-20 shadow-[2px_0_8px_rgba(0,0,0,0.02)] overflow-y-auto scrollbar-hide">
         <div className="mb-4">
@@ -947,7 +1015,7 @@ export function PosterEditor() {
       </AnimatePresence>
 
       {/* Main Canvas Area */}
-      <div className={`flex-1 flex flex-col relative overflow-hidden transition-all duration-300 ${activePanel ? 'mb-[50vh] md:mb-0' : ''}`}>
+      <div className={`flex-1 flex flex-col relative overflow-hidden transition-all duration-300 ${activePanel ? 'mb-[260px] md:mb-0' : ''}`}>
         {/* Mobile Header */}
         <div className="md:hidden flex items-center justify-between p-4 bg-white border-b z-30 shadow-sm relative">
           <div className="w-8" />
@@ -990,7 +1058,7 @@ export function PosterEditor() {
         </div>
 
         {/* Canvas Background & Container */}
-        <div className="flex-1 relative bg-[#f0f2f5] overflow-hidden flex items-center justify-center md:items-center md:justify-center p-6 md:p-8">
+        <div className="flex-1 relative bg-[#f0f2f5] overflow-hidden flex items-center justify-center md:items-center md:justify-center pt-4 pb-10 px-4 md:p-8">
            {/* Background Pattern */}
            <div className="absolute inset-0 opacity-[0.03]" 
                 style={{ 
