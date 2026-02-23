@@ -764,7 +764,8 @@ export function PosterEditor() {
 
   return (
     <div
-      className="flex w-full bg-[#f8f9fa] overflow-hidden text-slate-900"
+    className="flex w-full bg-[#f8f9fa] overflow-hidden text-slate-900 overscroll-none"
+
       style={{ height: viewportHeight ?? '100vh' }}
     >
       {/* Desktop Sidebar */}
@@ -1058,7 +1059,7 @@ export function PosterEditor() {
         </div>
 
         {/* Canvas Background & Container */}
-        <div className="flex-1 relative bg-[#f0f2f5] overflow-hidden flex items-center justify-center md:items-center md:justify-center pt-4 pb-10 px-4 md:p-8">
+        <div className="flex-1 relative bg-[#f0f2f5] overflow-hidden flex items-center justify-center md:items-center md:justify-center py-6 px-4 md:p-8 overscroll-none touch-none">
            {/* Background Pattern */}
            <div className="absolute inset-0 opacity-[0.03]" 
                 style={{ 
@@ -1077,13 +1078,14 @@ export function PosterEditor() {
           >
             <div
               ref={canvasRef}
-              className="relative w-full h-full bg-white overflow-hidden cursor-default select-none"
+              className="relative w-full h-full bg-white overflow-hidden cursor-default select-none touch-none overscroll-none"
               style={{
                 width: selectedRatio.width,
                 height: selectedRatio.height,
                 transform: `scale(${canvasScale})`,
                 transformOrigin: 'top left',
                 backgroundColor: backgroundColor,
+                touchAction: 'none',
               }}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
