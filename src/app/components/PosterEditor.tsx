@@ -67,6 +67,7 @@ const GRAPHICS = [
 ];
 
 const FONTS = [
+  { name: 'Cabinet Grotesk', value: 'Cabinet Grotesk' },
   { name: 'Pretendard', value: 'Pretendard' },
   { name: 'SUITE', value: 'SUITE' },
   { name: 'Montserrat', value: 'Montserrat' },
@@ -267,8 +268,10 @@ export function PosterEditor() {
   };
 
   const updateElement = (id: string, updates: Partial<CanvasElement>) => {
-    setElements(
-      elements.map((el) => (el.id === id ? { ...el, ...updates } : el))
+    setElements((prev) =>
+      prev.map((el) =>
+        el.id === id ? { ...el, ...updates } : el
+      )
     );
   };
 
@@ -1260,7 +1263,7 @@ export function PosterEditor() {
                          {FONTS.map(font => (
                             <button
                                key={font.value}
-                               onClick={() => updateElement(selectedElementId, { fontFamily: font.value })}
+                               onClick={() => selectedElementId && updateElement(selectedElementId, { fontFamily: font.value })}
                                className={`w-full text-left px-3 py-2 text-sm rounded-md hover:bg-gray-50 flex items-center justify-between ${selectedElement.fontFamily === font.value ? 'text-[#ff6000] bg-orange-50' : 'text-gray-700'}`}
                                style={{ fontFamily: font.value }}
                             >
@@ -1270,6 +1273,7 @@ export function PosterEditor() {
                          ))}
                       </PopoverContent>
                    </Popover>
+                   
 
                    {/* Font Size */}
                    <div className="flex items-center border border-gray-200 rounded-lg h-9 bg-white overflow-hidden">

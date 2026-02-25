@@ -1,3 +1,13 @@
+/* ===== 외부 CDN 폰트 ===== */
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css');
 @import url('https://cdn.jsdelivr.net/gh/sun-typeface/SUITE/fonts/static/woff2/SUITE.css');
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+@import url("https://fonts.cdnfonts.com/css/cabinet-grotesk");
+
+/* ===== Cabinet Grotesk (Fontshare 공식) ===== */
+@font-face {
+    font-family: "Cabinet Grotesk";
+    src: url("/fonts/CabinetGrotesk-Variable.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+  }

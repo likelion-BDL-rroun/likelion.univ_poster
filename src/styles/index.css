@@ -1,3 +1,11 @@
-@import './fonts.css';
-@import './tailwind.css';
-@import './theme.css';
+@import "./fonts.css";
+@import "./tailwind.css";
+@import "./theme.css";
+
+@import "./fonts.css";
+@import "./tailwind.css";
+@import "./theme.css";
+
+html, body {
+  font-family: "Cabinet Grotesk", "Pretendard", "SUITE", system-ui, sans-serif;
+}
